@@ -51,6 +51,9 @@ struct settings_t {
   bool has_player_color;
   bool has_coordinate_color;
   bool has_warp_color;
+  bool googleMode;
+  int googleLevels;
+  bool googleOpt;
   // top/bottom used for slicing
   int top;
   int bottom;
@@ -143,6 +146,9 @@ struct settings_t {
     this->write_js = false;
     this->no_log = false;
     this->disable_skylight = false;
+    this->googleMode = false;
+    this->googleLevels = 0;
+    this->googleOpt = false;
   }
   
   ~settings_t() {
