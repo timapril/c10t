@@ -12,6 +12,7 @@
 #include <iostream>
 #include <iomanip>
 #include <fstream>
+#include <cstdlib>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/ptr_container/ptr_list.hpp>
@@ -20,6 +21,8 @@
 #include <boost/format.hpp>
 #include <boost/tokenizer.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/filesystem/operations.hpp>
+#include <boost/filesystem/fstream.hpp>
 
 #include "config.hpp"
 
@@ -726,10 +729,78 @@ bool generate_map(settings_t &s, fs::path& world_path, fs::path& output_path) {
   else {
     overlay_markers(s, all, engine, markers);
   }
-  
-  if (s.use_split) {
+  if( s.googleMode ){
+  	
+  	ofstream convert;
+  	
+  	if( s.googleOpt ){
+	  	fs::path pathOfConvert = fs::complete(fs::path(output_path.string() + "/postProcess.sh" ));
+  		convert.open(pathOfConvert.string().c_str(), ios_base::app );
+  	}
+  	
+  	string tilePath = "";
+  	fs::path pathOfTiles = fs::complete(fs::path(output_path.string() + "/tiles/", fs::native));
+  	fs::create_directory(pathOfTiles);
+  	if( s.night ){
+  		tilePath = output_path.string() + "/tiles/night.%d.%d.%d.png";
+  	}else{
+  		tilePath = output_path.string() + "/tiles/day.%d.%d.%d.png";
+  	}
+  	std::cout << "Tile Path: " << tilePath << std::endl;
+  	
+  	for( int level = 0; level <= s.googleLevels; level++ ){
+  		s.split = static_cast<int>(pow(static_cast<double>(2), level)) * 128;
+  		
+  		int levelid = s.googleLevels - level;
+  		
+  		std::cout << "Level: " << levelid << "(" << s.split << ")" << std::endl;
+  		
+  		{
+		  out << " --- SAVING MULTIPLE IMAGES --- " << endl;
+		  out << "splitting on " << s.split << "px basis" << endl;
+		}
+		
+		std::map<point2, image_base*> parts = image_split(all.get(), s.split);
+		
+		{
+		  out << "saving " << parts.size() << " images" << endl;
+		}
+		
+		for (std::map<point2, image_base*>::iterator it = parts.begin(); it != parts.end(); it++) {
+		  const point2 p = it->first;
+		  boost::scoped_ptr<image_base> img(it->second);
+		  
+		  stringstream ss;
+		  
+		  ss << boost::format(tilePath) % p.x % p.y % levelid ;
+		  
+		  std::string path = ss.str();
+		  
+		  float scale = ( 256.0 / s.split ) * 100.0;
+		  convert << "convert " << path << " -scale " <<  scale << "% " << path << std::endl;
+		  convert << "echo \"convert " << path << " -scale " <<  scale << "% " << path << "\"" << std::endl;
+		  
+		  png_format::opt_type opts;
+	
+		  opts.center_x = center_x;
+		  opts.center_y = center_y;
+		  opts.comment = C10T_COMMENT;
+		  
+		  if (!img->save<png_format>(path, opts)) {
+			out << path << ": Could not save image";
+			continue;
+		  }
+		  
+		  out << path << ": OK" << endl;
+		}
+		
+  	}
+  	if( s.googleOpt ){
+  			convert.close();
+  		}
+  }else if (s.use_split) {
     //boost::ptr_map<point2, image_base> parts;
-    
+    //IMPLEMENT HERE
     {
       out << " --- SAVING MULTIPLE IMAGES --- " << endl;
       out << "splitting on " << s.split << "px basis" << endl;
@@ -1079,6 +1150,12 @@ int do_help() {
     << "                              defaults to 'cache' if not specified             " << endl
     << "  --cache-compress          - Compress the cache files using zlib compression  " << endl
        /*******************************************************************************/
+    //Google Map Support
+    << " --google <numLevels>       - Creates a google map version of the output with  " << endl
+    << "                              the specified number of levels                   " << endl
+    << " --googleOpt                - Optomizes the images for google maps. Requires   " << endl
+    << "                              ImageMagick to be installed and accessable       " << endl
+    << "                              via convert                                      " << endl
     << endl;
   out << endl;
   out << "Typical usage:" << endl;
@@ -1323,6 +1400,62 @@ bool do_read_palette(settings_t& s, string& path) {
   return true;
 }
 
+void create_google_map_files(fs::path& output_path, int zoomLevel){
+
+	char levels[10];
+	
+	sprintf( levels, "%d", zoomLevel);
+
+	string index = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\"\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\"><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><meta name=\"viewport\" content=\"initial-scale=1.0, user-scalable=no\" /><script type=\"text/javascript\" src=\"http://maps.google.com/maps/api/js?sensor=false\"></script><script type=\"text/javascript\"> function extend(t , o) { for (k in o) { if (o[k] != null) { t[k] = o[k]; } } return t; } function keys(o) { var a = []; for (m in modes) { a[a.length] = m; }; return a; } var GRID_WIDTH_IN_REGIONS = 4096; var SCALE_FACTOR = 90.0 / GRID_WIDTH_IN_REGIONS; function EuclideanProjection() {}; EuclideanProjection.prototype.fromLatLngToPoint = function(latLng, opt_point) { var point = opt_point || new google.maps.Point(0, 0); point.x = latLng.lng() / SCALE_FACTOR; point.y = latLng.lat() / SCALE_FACTOR; return point; }; EuclideanProjection.prototype.fromPointToLatLng = function(point) { var lng = point.x * SCALE_FACTOR; var lat = point.y * SCALE_FACTOR; return new google.maps.LatLng(lat, lng, true); }; function new_map_type(m, o, ob) { return extend( { getTileUrl: function(c, z) { return o.host + m + \".\" + c.x + \".\" + c.y + \".\" + z + \".png\"; }, isPng: true, name : \"none\", alt : \"none\", minZoom: 0, maxZoom: ";
+	index += levels;
+	index += ", tileSize: new google.maps.Size(256, 256) }, ob ); } function initialize(id, opt, modes) { var element = document.getElementById(id); opt = extend(opt, { mapTypeControlOptions: { mapTypeIds: keys(modes), style: google.maps.MapTypeControlStyle.DROPDOWN_MENU}}); var map = new google.maps.Map(element, opt); var firstMode = null; for (m in modes) { var imt  = new google.maps.ImageMapType(new_map_type(m, opt, modes[m])); imt.projection = new EuclideanProjection(); map.mapTypes.set(m, imt); if (firstMode == null) firstMode = m; } map.setMapTypeId(firstMode); var globaldata = modes[firstMode].data; { var world = globaldata.world; var center = new google.maps.Point(world[\"cx\"] / 16, world[\"cy\"] / 16); var latlng = EuclideanProjection.prototype.fromPointToLatLng(center); map.setCenter(latlng); map.setZoom(0); } for (var i = 0; i < globaldata.markers.length; i++) { var m = globaldata.markers[i]; var point = new google.maps.Point(m.x / 16, m.y / 16); var latlng = EuclideanProjection.prototype.fromPointToLatLng(point); new google.maps.Marker({ position: latlng,  map: map, title: m.text }); } if (window.attachEvent) { window.attachEvent(\"onresize\", function() {this.map.onResize()} ); } else { window.addEventListener(\"resize\", function() {this.map.onResize()} , false); } } </script><!-- Make the document body take up the full screen --> <style type=\"text/css\"> v\\:* {behavior:url(#default#VML);} html, body {width: 100%; height: 100%} body {margin-top: 0px; margin-right: 0px; margin-left: 0px; margin-bottom: 0px} </style> <script type=\"text/javascript\" src=\"options.js\"></script></head><body onload=\"initialize('map_canvas', options, modes)\"> <div id=\"map_canvas\" style=\"width: 100%; height: 100%;\"></div></body></html>";
+	
+	string indexPath = output_path.string() + "/index.html";
+  	fs::path fullIndexPath = fs::system_complete(fs::path(indexPath));
+  	
+  	FILE * indexFH = fopen( fullIndexPath.string().c_str(), "w" );
+  	fprintf(indexFH, "%s", index.c_str());
+  	fclose(indexFH);
+  	
+  	string dayJsonPath = output_path.string() + "/day.json";
+  	fs::path fullDayJsonPath = fs::system_complete(fs::path(dayJsonPath));
+  	ifstream dayjson;
+  	dayjson.open( fullDayJsonPath.string().c_str() );
+  	
+  	string nightJsonPath = output_path.string() + "/night.json";
+  	fs::path fullNightJsonPath = fs::system_complete(fs::path(nightJsonPath));
+  	ifstream nightjson;
+  	nightjson.open( fullDayJsonPath.string().c_str() );
+  	
+  	string options = "var options = { host: \"tiles/\", scaleControl: false, navigationControl: true, streetViewControl: false, noClear: false, backgroundColor: \"#000000\", isPng: true, }; var modes = { 'day': { name: \"Day\", alt: \"Day Mode\", data: ";
+  	
+  	while( !dayjson.eof() ){
+  		string part = "";
+  		dayjson >> part;
+  		options += part;
+  	}
+  	dayjson.close();
+  	
+  	options += "}, 'night': { name: \"Night\", alt: \"Night Mode\", data: ";
+  	
+  	while( !nightjson.eof() ){
+  		string part = "";
+  		nightjson >> part;
+  		options += part;
+  	}
+  	nightjson.close();
+  	
+  	options += "}, }";
+  	
+  	string optionsPath = output_path.string() + "/options.js";
+  	fs::path fullOptionsPath = fs::system_complete(fs::path(optionsPath));
+  	
+  	FILE * optionsFH = fopen( fullOptionsPath.string().c_str(), "w" );
+  	fprintf(optionsFH, "%s", options.c_str());
+  	fclose(optionsFH);
+  	
+}
+
 int main(int argc, char *argv[]){
   nullstream nil;
   
@@ -1393,6 +1526,8 @@ int main(int argc, char *argv[]){
      {"write-json",       required_argument, &flag, 16},
      {"write-js",         required_argument, &flag, 26},
      {"write-markers",       required_argument, &flag, 21},
+     {"google",			  required_argument, &flag, 27},
+     {"googleOpt",		  no_argument, &flag, 28},
      {"split",            required_argument, &flag, 17},
      {"pixelsplit",       required_argument, &flag, 17},
      {"show-warps",       required_argument, &flag, 18},
@@ -1582,6 +1717,16 @@ int main(int argc, char *argv[]){
       case 25:
         s.no_log = true;
         break;
+      case 27:
+      	
+      	s.googleMode = true;
+      	s.googleLevels = atoi(optarg);
+      	std::cout << "Google Map" << std::endl << "Map Levels: " << s.googleLevels << std::endl;
+      	
+    	break;
+      case 28:
+      	s.googleOpt = true;
+      	break;
       }
       
       continue;
@@ -1814,7 +1959,28 @@ int main(int argc, char *argv[]){
   }
   
   if (do_generate_map)  {
-    if (!generate_map(s, world_path, output_path)) goto exit_error;
+  	if( s.googleMode ){
+  	  s.night = false;
+  	  s.write_json = true;
+  	  string jsonPath = output_path.string() + "/day.json";
+  	  s.write_json_path = fs::system_complete(fs::path(jsonPath));
+  	  if (!generate_map(s, world_path, output_path)) goto exit_error;
+  	  s.night = true;
+  	  s.write_json = true;
+  	  jsonPath = output_path.string() + "/night.json";
+  	  s.write_json_path = fs::system_complete(fs::path(jsonPath));
+  	  if (!generate_map(s, world_path, output_path)) goto exit_error;
+  	  
+  	  create_google_map_files(output_path, s.googleLevels);
+  	  string postProcessPath = output_path.string() + "/postProcess.sh";
+  	  string postProcessCommand = "sh " + postProcessPath;
+  	  string postProcessRmCommand = "rm " + postProcessPath;
+  	  system( postProcessCommand.c_str() );
+  	  system( postProcessRmCommand.c_str() );
+  	  
+  	}else{
+      if (!generate_map(s, world_path, output_path)) goto exit_error;
+    }
   }
   else if (do_generate_statistics)  {
     if (!generate_statistics(s, world_path, statistics_path)) goto exit_error;
